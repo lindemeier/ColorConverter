@@ -87,17 +87,28 @@ public:
     rgb_2_Yuv
   };
 
-  static constexpr Vec3 IM_ILLUMINANT_A   = {1.09850, 1.00000, 0.35585};
-  static constexpr Vec3 IM_ILLUMINANT_B   = {0.99072, 1.00000, 0.85223};
-  static constexpr Vec3 IM_ILLUMINANT_C   = {0.98074, 1.00000, 1.18232};
-  static constexpr Vec3 IM_ILLUMINANT_D50 = {0.96422, 1.00000, 0.82521};
-  static constexpr Vec3 IM_ILLUMINANT_D55 = {0.95682, 1.00000, 0.92149};
-  static constexpr Vec3 IM_ILLUMINANT_D65 = {0.95047, 1.00000, 1.08883};
-  static constexpr Vec3 IM_ILLUMINANT_D75 = {0.94972, 1.00000, 1.22638};
-  static constexpr Vec3 IM_ILLUMINANT_E   = {1.00000, 1.00000, 1.00000};
-  static constexpr Vec3 IM_ILLUMINANT_2   = {0.99186, 1.00000, 0.67393};
-  static constexpr Vec3 IM_ILLUMINANT_7   = {0.95041, 1.00000, 1.08747};
-  static constexpr Vec3 IM_ILLUMINANT_11  = {1.00962, 1.00000, 0.64350};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_A   = {1.09850, 1.00000,
+                                                             0.35585};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_B   = {0.99072, 1.00000,
+                                                             0.85223};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_C   = {0.98074, 1.00000,
+                                                             1.18232};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_D50 = {0.96422, 1.00000,
+                                                               0.82521};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_D55 = {0.95682, 1.00000,
+                                                               0.92149};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_D65 = {0.95047, 1.00000,
+                                                               1.08883};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_D75 = {0.94972, 1.00000,
+                                                               1.22638};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_E   = {1.00000, 1.00000,
+                                                             1.00000};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_2   = {0.99186, 1.00000,
+                                                             0.67393};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_7   = {0.95041, 1.00000,
+                                                             1.08747};
+  static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_11  = {1.00962, 1.00000,
+                                                              0.64350};
 
 private: // private constants
   // sRGB D65, http://brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
@@ -113,13 +124,13 @@ private: // private constants
     {0.0193339, 0.1191920, 0.9503041}};
 
 public:
-  ColorConverter(const Vec3& whitepoint = IM_ILLUMINANT_D65);
+  ColorConverter(const std::array<Scalar, 3U>& whitepoint = IM_ILLUMINANT_D65);
 
   inline void convert(const Vec3& input, Vec3& output,
                       Conversion conversion) const;
 
 private:
-  const Vec3 illuminant;
+  const std::array<Scalar, 3U> illuminant;
 
   inline void lab2xyz(const Vec3& Lab, Vec3& XYZ) const;
   inline void xyz2lab(const Vec3& XYZ, Vec3& Lab) const;
@@ -153,7 +164,7 @@ private:
 };
 
 template <class Vec3>
-ColorConverter<Vec3>::ColorConverter(const Vec3& whitepoint)
+ColorConverter<Vec3>::ColorConverter(const std::array<Scalar, 3U>& whitepoint)
   : illuminant(whitepoint)
 {
 }
