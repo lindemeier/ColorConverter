@@ -1,5 +1,5 @@
 /**
- * @file ColorConversion.hxx
+ * @file ColorConverter.hxx
  * @author Thomas Lindemeier
  * @brief Collection of color conversion functions.
  * @date 2019-04-14
