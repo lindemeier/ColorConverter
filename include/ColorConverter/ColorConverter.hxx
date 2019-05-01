@@ -35,24 +35,7 @@ static T fi(T t)
 } // namespace detail
 
 /**
- * @brief Type trait that can be used for defining new types that should be
- * supported by the ColorConverter.
- *
- * @tparam T the Scalar
- */
-template <typename T>
-class VecType
-{
-public:
-  using Scalar = T;
-  static_assert(std::is_floating_point<T>::value,
-                "only floating point scalar types supported.");
-
-  static std::string getName() { return typeid(T).name(); }
-};
-
-/**
- * @brief Class that holds color cnoversion functions with reference to a given
+ * @brief Class that holds color conversion functions with reference to a given
  * white point (illuminant).
  *
  * Most of the conversion and constants were taken from
@@ -61,12 +44,12 @@ public:
  *
  * @tparam T precision
  */
-template <class Vec3>
+template <class Scalar, template <class, size_t> class Vec>
 class ColorConverter
 {
-public:
-  using Scalar = typename VecType<Vec3>::Scalar;
+  using Vec3 = Vec<Scalar, 3UL>;
 
+public:
   /**
    * @brief Represents conversion source2target.
    */
@@ -573,124 +556,121 @@ private:
   {
     return std::fabs(a - b) < std::numeric_limits<Scalar>::epsilon();
   }
+
+  /**
+   * @brief Compute difference of two given colors.
+   *
+   * Ported to C++ from matlab script
+   * (https://github.com/scienstanford/iqmetrics/blob/master/SCIELAB_FR/deltaE2000.m)
+   *
+   * Remarks:
+   * Refer to https://en.wikipedia.org/wiki/Color_difference for details.
+   *
+   * @param lab1
+   * @param lab2
+   * @return Scalar
+   */
+  static Scalar ColorDifferenceCIEDE2000(const Vec3& lab1, const Vec3& lab2)
+  {
+    Scalar Lstd = lab1[0];
+    Scalar astd = lab1[1];
+    Scalar bstd = lab1[2];
+
+    Scalar Lsample = lab2[0];
+    Scalar asample = lab2[1];
+    Scalar bsample = lab2[2];
+
+    constexpr Scalar pi = 3.1415926535897932384626433832795;
+
+    Scalar Cabstd    = std::sqrt(astd * astd + bstd * bstd);
+    Scalar Cabsample = std::sqrt(asample * asample + bsample * bsample);
+
+    Scalar Cabarithmean = (Cabstd + Cabsample) / 2.;
+
+    Scalar G =
+      0.5f * (1. - std::sqrt(std::pow(Cabarithmean, 7.) /
+                             (std::pow(Cabarithmean, 7.) + std::pow(25., 7.))));
+
+    Scalar apstd    = (1. + G) * astd;    // aprime in paper
+    Scalar apsample = (1. + G) * asample; // aprime in paper
+    Scalar Cpsample = std::sqrt(apsample * apsample + bsample * bsample);
+
+    Scalar Cpstd = std::sqrt(apstd * apstd + bstd * bstd);
+    // Compute product of chromas
+    Scalar Cpprod = (Cpsample * Cpstd);
+
+    // Ensure hue is between 0 and 2pi
+    Scalar hpstd = std::atan2(bstd, apstd);
+    if (hpstd < 0)
+      hpstd += 2. * pi; // rollover ones that come -ve
+
+    Scalar hpsample = std::atan2(bsample, apsample);
+    if (hpsample < 0)
+      hpsample += 2. * pi;
+    if (fuzzy((fabs(apsample) + fabs(bsample)), 0.))
+      hpsample = 0.;
+
+    Scalar dL = (Lsample - Lstd);
+    Scalar dC = (Cpsample - Cpstd);
+
+    // Computation of hue difference
+    Scalar dhp = (hpsample - hpstd);
+    if (dhp > pi)
+      dhp -= 2. * pi;
+    if (dhp < -pi)
+      dhp += 2. * pi;
+    // set chroma difference to zero if the product of chromas is zero
+    if (fuzzy(Cpprod, 0.))
+      dhp = 0.;
+
+    // Note that the defining equations actually need
+    // signed Hue and chroma differences which is different
+    // from prior color difference formulae
+
+    Scalar dH = 2. * std::sqrt(Cpprod) * sin(dhp / 2.);
+    //%dH2 = 4*Cpprod.*(sin(dhp/2)).^2;
+
+    // weighting functions
+    Scalar Lp = (Lsample + Lstd) / 2.;
+    Scalar Cp = (Cpstd + Cpsample) / 2.;
+
+    // Average Hue Computation
+    // This is equivalent to that in the paper but simpler programmatically.
+    // Note average hue is computed in radians and converted to degrees only
+    // where needed
+    Scalar hp = (hpstd + hpsample) / 2.;
+    // Identify positions for which abs hue diff exceeds 180 degrees
+    if (fabs(hpstd - hpsample) > pi)
+      hp -= pi;
+    // rollover ones that come -ve
+    if (hp < 0)
+      hp += 2. * pi;
+
+    // Check if one of the chroma values is zero, in which case set
+    // mean hue to the sum which is equivalent to other value
+    if (fuzzy(Cpprod, 0.))
+      hp = hpsample + hpstd;
+
+    Scalar Lpm502 = (Lp - 50.) * (Lp - 50.);
+    Scalar Sl     = 1. + 0.015f * Lpm502 / std::sqrt(20.0f + Lpm502);
+    Scalar Sc     = 1. + 0.045f * Cp;
+    Scalar Ta     = 1. - 0.17f * std::cos(hp - pi / 6.) +
+                0.24f * std::cos(2. * hp) +
+                0.32f * std::cos(3. * hp + pi / 30.) -
+                0.20f * std::cos(4. * hp - 63. * pi / 180.);
+    Scalar Sh = 1. + 0.015f * Cp * Ta;
+    Scalar delthetarad =
+      (30. * pi / 180.) *
+      std::exp(-std::pow(((180. / pi * hp - 275.) / 25.), 2.));
+    Scalar Rc =
+      2. * std::sqrt(std::pow(Cp, 7.) / (std::pow(Cp, 7.) + std::pow(25., 7.)));
+    Scalar RT = -std::sin(2.0f * delthetarad) * Rc;
+
+    // The CIE 00 color difference
+    return std::sqrt(std::pow((dL / Sl), 2.) + std::pow((dC / Sc), 2.) +
+                     std::pow((dH / Sh), 2.) + RT * (dC / Sc) * (dH / Sh));
+  }
 };
-
-/**
- * @brief Compute difference of two given colors.
- *
- * Ported to C++ from matlab script
- * (https://github.com/scienstanford/iqmetrics/blob/master/SCIELAB_FR/deltaE2000.m)
- *
- * Remarks:
- * Refer to https://en.wikipedia.org/wiki/Color_difference for details.
- *
- * @tparam T
- * @param lab1
- * @param lab2
- * @return T
- */
-template <class Vec3>
-typename VecType<Vec3>::Scalar
-ColorDifferenceCIEDE2000(const typename ColorConverter<Vec3>::Vec3& lab1,
-                         const typename ColorConverter<Vec3>::Vec3& lab2)
-{
-  using Scalar = typename VecType<Vec3>::Scalar;
-  Scalar Lstd  = lab1[0];
-  Scalar astd  = lab1[1];
-  Scalar bstd  = lab1[2];
-
-  Scalar Lsample = lab2[0];
-  Scalar asample = lab2[1];
-  Scalar bsample = lab2[2];
-
-  constexpr Scalar pi = 3.1415926535897932384626433832795;
-
-  Scalar Cabstd    = std::sqrt(astd * astd + bstd * bstd);
-  Scalar Cabsample = std::sqrt(asample * asample + bsample * bsample);
-
-  Scalar Cabarithmean = (Cabstd + Cabsample) / 2.;
-
-  Scalar G =
-    0.5f * (1. - std::sqrt(std::pow(Cabarithmean, 7.) /
-                           (std::pow(Cabarithmean, 7.) + std::pow(25., 7.))));
-
-  Scalar apstd    = (1. + G) * astd;    // aprime in paper
-  Scalar apsample = (1. + G) * asample; // aprime in paper
-  Scalar Cpsample = std::sqrt(apsample * apsample + bsample * bsample);
-
-  Scalar Cpstd = std::sqrt(apstd * apstd + bstd * bstd);
-  // Compute product of chromas
-  Scalar Cpprod = (Cpsample * Cpstd);
-
-  // Ensure hue is between 0 and 2pi
-  Scalar hpstd = std::atan2(bstd, apstd);
-  if (hpstd < 0)
-    hpstd += 2. * pi; // rollover ones that come -ve
-
-  Scalar hpsample = std::atan2(bsample, apsample);
-  if (hpsample < 0)
-    hpsample += 2. * pi;
-  if (fuzzy((fabs(apsample) + fabs(bsample)), 0.))
-    hpsample = 0.;
-
-  Scalar dL = (Lsample - Lstd);
-  Scalar dC = (Cpsample - Cpstd);
-
-  // Computation of hue difference
-  Scalar dhp = (hpsample - hpstd);
-  if (dhp > pi)
-    dhp -= 2. * pi;
-  if (dhp < -pi)
-    dhp += 2. * pi;
-  // set chroma difference to zero if the product of chromas is zero
-  if (fuzzy(Cpprod, 0.))
-    dhp = 0.;
-
-  // Note that the defining equations actually need
-  // signed Hue and chroma differences which is different
-  // from prior color difference formulae
-
-  Scalar dH = 2. * std::sqrt(Cpprod) * sin(dhp / 2.);
-  //%dH2 = 4*Cpprod.*(sin(dhp/2)).^2;
-
-  // weighting functions
-  Scalar Lp = (Lsample + Lstd) / 2.;
-  Scalar Cp = (Cpstd + Cpsample) / 2.;
-
-  // Average Hue Computation
-  // This is equivalent to that in the paper but simpler programmatically.
-  // Note average hue is computed in radians and converted to degrees only
-  // where needed
-  Scalar hp = (hpstd + hpsample) / 2.;
-  // Identify positions for which abs hue diff exceeds 180 degrees
-  if (fabs(hpstd - hpsample) > pi)
-    hp -= pi;
-  // rollover ones that come -ve
-  if (hp < 0)
-    hp += 2. * pi;
-
-  // Check if one of the chroma values is zero, in which case set
-  // mean hue to the sum which is equivalent to other value
-  if (fuzzy(Cpprod, 0.))
-    hp = hpsample + hpstd;
-
-  Scalar Lpm502 = (Lp - 50.) * (Lp - 50.);
-  Scalar Sl     = 1. + 0.015f * Lpm502 / std::sqrt(20.0f + Lpm502);
-  Scalar Sc     = 1. + 0.045f * Cp;
-  Scalar Ta = 1. - 0.17f * std::cos(hp - pi / 6.) + 0.24f * std::cos(2. * hp) +
-              0.32f * std::cos(3. * hp + pi / 30.) -
-              0.20f * std::cos(4. * hp - 63. * pi / 180.);
-  Scalar Sh          = 1. + 0.015f * Cp * Ta;
-  Scalar delthetarad = (30. * pi / 180.) *
-                       std::exp(-std::pow(((180. / pi * hp - 275.) / 25.), 2.));
-  Scalar Rc =
-    2. * std::sqrt(std::pow(Cp, 7.) / (std::pow(Cp, 7.) + std::pow(25., 7.)));
-  Scalar RT = -std::sin(2.0f * delthetarad) * Rc;
-
-  // The CIE 00 color difference
-  return std::sqrt(std::pow((dL / Sl), 2.) + std::pow((dC / Sc), 2.) +
-                   std::pow((dH / Sh), 2.) + RT * (dC / Sc) * (dH / Sh));
-}
 
 } // namespace color
 

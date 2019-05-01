@@ -4,36 +4,12 @@
 
 #include <ColorConverter/ColorConverter.hxx>
 
-namespace color
-{
-/**
- * @brief Example type trait for std::array
- *
- * @tparam T the scalar floating point value
- */
-template <typename T>
-class VecType<std::array<T, 3U>>
-{
-public:
-  /**
-   * @brief This is needed by the converter to know what the scalr type of your
-   * vec type is.
-   */
-  using Scalar = T;
-  static_assert(std::is_floating_point<T>::value,
-                "only floating point scalar types supported.");
-
-  static std::string getName() { return typeid(T).name(); }
-};
-
-} // namespace color
-
 int main()
 {
   // define custom vec type that is defined by our type trait above
   using vec = std::array<double, 3U>;
   // Save some typing
-  using Converter = color::ColorConverter<vec>;
+  using Converter = color::ColorConverter<double, std::array>;
 
   // initialize the converter to standard sRGB illuminant (which is also the
   // default argument).
