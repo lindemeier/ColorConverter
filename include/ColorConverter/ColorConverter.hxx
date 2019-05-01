@@ -15,80 +15,35 @@
 namespace color
 {
 
-namespace detail
-{
-
-template <class T>
-static T f(T t)
-{
-  return (t > std::pow<T>(6. / 29., 3.))
-           ? std::pow<T>(t, 1. / 3.)
-           : (1. / 3.) * std::pow<T>(29. / 6., 2.) * t + (4. / 29.);
-}
-
-template <class T>
-static T fi(T t)
-{
-  return (t > 6. / 29.) ? std::pow<T>(t, 3.)
-                        : 3. * std::pow<T>(6. / 29., 2.) * (t - (4. / 29.));
-}
-} // namespace detail
-
 /**
  * @brief Class that holds color conversion functions with reference to a given
  * white point (illuminant).
+ *
+ * Only data types of the template form vec<Type, size_t> are supported. Only
+ * floating points and data types with 3 components are supported.
  *
  * Most of the conversion and constants were taken from
  * http://brucelindbloom.com/index.html (last accessed 2019 April 14th)
  * Credits to that guy!
  *
- * @tparam T precision
+ * @tparam Scalar Data type of each component. Only floating point values
+ * supported.
+ *
+ * @tparam N Number of components. Has to be equal to 3.
+ *
+ * @tparam Vec The data structure template class of the form Vec<Scalar, 3UL>
  */
-template <class Scalar, template <class, size_t> class Vec>
+template <class Scalar, size_t N, template <class, size_t> class Vec,
+          typename std::enable_if_t<
+            std::is_floating_point<Scalar>::value && (N == 3UL), int> = 0>
 class ColorConverter
 {
-  using Vec3 = Vec<Scalar, 3UL>;
+  using Vec3 = Vec<Scalar, N>;
+
+  static constexpr Scalar Pi =
+    static_cast<Scalar>(3.1415926535897932384626433832795);
 
 public:
-  /**
-   * @brief Represents conversion source2target.
-   */
-  enum class Conversion
-  {
-    CIELab_2_XYZ,
-    XYZ_2_CIELab,
-    CIELab_2_LCHab, // CIE LCHab
-    LCH_ab_2_CIELab,
-    ryb_2_rgb, // http://en.wikipedia.org/wiki/RYB_color_model,
-               // http://threekings.tk/mirror/ryb_TR.pdf
-    rgb_2_cmy,
-    cmy_2_rgb,
-    rgb_2_XYZ,       // uses sRGB chromatic adapted matrix
-    XYZ_2_rgb,       // uses sRGB chromatic adapted matrix
-    srgb_2_rgb,      // make linear rgb, no chromatic adaption
-    rgb_2_srgb,      // make sRGB, with gamma
-    CIELab_2_srgb,   // Lab (whitepoint) -> XYZ -> rgb (D65) -> sRGB (D65)
-    srgb_2_CIELab,   // sRGB (D65) -> rgb (D65) -> XYZ -> Lab (whitepoint)
-    srgb_2_CIELCHab, // sRGB (D65) -> rgb (D65) -> XYZ -> Lab (whitepoint)
-    CIELCHab_2_srgb, // sRGB (D65) -> rgb (D65) -> XYZ -> Lab (whitepoint)
-    rgb_2_CIELCHab,
-    CIELCHab_2_rgb,
-    CIELab_2_rgb, // Lab (whitepoint) -> XYZ -> rgb (D65)
-    rgb_2_CIELab, // rgb (D65) -> XYZ -> Lab (D50)
-    XYZ_2_srgb,   // XYZ -> rgb (D65) -> sRGB (D65)
-    hsv_2_srgb,   // [0..1] -> [0..1]
-    srgb_2_hsv,   // [0..1] -> [0..1]
-    srgb_2_XYZ,   // sRGB (D65) -> XYZ
-    XYZ_2_xyY,
-    xyY_2_XYZ,
-    Luv_2_XYZ,
-    XYZ_2_Luv,
-    Luv_2_LCH_uv, // CIE LCHuv
-    LCH_uv_2_Luv,
-    Yuv_2_rgb, // Y Cb Cr
-    rgb_2_Yuv
-  };
-
   static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_A   = {1.09850, 1.00000,
                                                              0.35585};
   static constexpr std::array<Scalar, 3U> IM_ILLUMINANT_B   = {0.99072, 1.00000,
@@ -134,20 +89,18 @@ public:
   void lab2xyz(const Vec3& Lab, Vec3& XYZ) const
   {
     // chromatic adaption, reference white
-    XYZ[1] = illuminant[1] * detail::fi((1. / 116.) * (Lab[0] + 16.)); // Y
-    XYZ[0] = illuminant[0] * detail::fi((1. / 116.) * (Lab[0] + 16.) +
-                                        (1. / 500.) * Lab[1]); // X
-    XYZ[2] = illuminant[2] * detail::fi((1. / 116.) * (Lab[0] + 16.) -
-                                        (1. / 200.) * Lab[2]); // Z
+    XYZ[1] = illuminant[1] * fi((1. / 116.) * (Lab[0] + 16.)); // Y
+    XYZ[0] = illuminant[0] *
+             fi((1. / 116.) * (Lab[0] + 16.) + (1. / 500.) * Lab[1]); // X
+    XYZ[2] = illuminant[2] *
+             fi((1. / 116.) * (Lab[0] + 16.) - (1. / 200.) * Lab[2]); // Z
   }
 
   void xyz2lab(const Vec3& XYZ, Vec3& Lab) const
   {
-    Lab[0] = 116. * detail::f(XYZ[1] / illuminant[1]) - 16.;
-    Lab[1] = 500. * (detail::f(XYZ[0] / illuminant[0]) -
-                     detail::f(XYZ[1] / illuminant[1]));
-    Lab[2] = 200. * (detail::f(XYZ[1] / illuminant[1]) -
-                     detail::f(XYZ[2] / illuminant[2]));
+    Lab[0] = 116. * f(XYZ[1] / illuminant[1]) - 16.;
+    Lab[1] = 500. * (f(XYZ[0] / illuminant[0]) - f(XYZ[1] / illuminant[1]));
+    Lab[2] = 200. * (f(XYZ[1] / illuminant[1]) - f(XYZ[2] / illuminant[2]));
   }
 
   void lab2LCHab(const Vec3& Lab, Vec3& LCHab) const
@@ -158,7 +111,7 @@ public:
     LCHab[2] = std::atan2(Lab[2], Lab[1]);
     if (LCHab[2] < 0)
       {
-        LCHab[2] += M_PI * 2.; // [0, 2pi]
+        LCHab[2] += Pi * 2.; // [0, 2pi]
       }
   }
 
@@ -166,9 +119,9 @@ public:
   {
     Lab[0]   = LCHab[0];
     Scalar h = LCHab[2];
-    if (h > M_PI)
+    if (h > Pi)
       {
-        h -= M_PI * 2.; // [0, 2pi]
+        h -= Pi * 2.; // [0, 2pi]
       }
     Lab[1] = LCHab[1] * std::cos(h);
     Lab[2] = LCHab[1] * std::sin(h);
@@ -546,6 +499,20 @@ public:
 private:
   const std::array<Scalar, 3U> illuminant;
 
+  static Scalar f(Scalar t)
+  {
+    return (t > std::pow<Scalar>(6. / 29., 3.))
+             ? std::pow<Scalar>(t, 1. / 3.)
+             : (1. / 3.) * std::pow<Scalar>(29. / 6., 2.) * t + (4. / 29.);
+  }
+
+  static Scalar fi(Scalar t)
+  {
+    return (t > 6. / 29.)
+             ? std::pow<Scalar>(t, 3.)
+             : 3. * std::pow<Scalar>(6. / 29., 2.) * (t - (4. / 29.));
+  }
+
   /**
    * @brief Simple fuzzy comparison of floating point values.
    *
@@ -580,8 +547,6 @@ private:
     Scalar asample = lab2[1];
     Scalar bsample = lab2[2];
 
-    constexpr Scalar pi = 3.1415926535897932384626433832795;
-
     Scalar Cabstd    = std::sqrt(astd * astd + bstd * bstd);
     Scalar Cabsample = std::sqrt(asample * asample + bsample * bsample);
 
@@ -602,11 +567,11 @@ private:
     // Ensure hue is between 0 and 2pi
     Scalar hpstd = std::atan2(bstd, apstd);
     if (hpstd < 0)
-      hpstd += 2. * pi; // rollover ones that come -ve
+      hpstd += 2. * Pi; // rollover ones that come -ve
 
     Scalar hpsample = std::atan2(bsample, apsample);
     if (hpsample < 0)
-      hpsample += 2. * pi;
+      hpsample += 2. * Pi;
     if (fuzzy((fabs(apsample) + fabs(bsample)), 0.))
       hpsample = 0.;
 
@@ -615,10 +580,10 @@ private:
 
     // Computation of hue difference
     Scalar dhp = (hpsample - hpstd);
-    if (dhp > pi)
-      dhp -= 2. * pi;
-    if (dhp < -pi)
-      dhp += 2. * pi;
+    if (dhp > Pi)
+      dhp -= 2. * Pi;
+    if (dhp < -Pi)
+      dhp += 2. * Pi;
     // set chroma difference to zero if the product of chromas is zero
     if (fuzzy(Cpprod, 0.))
       dhp = 0.;
@@ -640,11 +605,11 @@ private:
     // where needed
     Scalar hp = (hpstd + hpsample) / 2.;
     // Identify positions for which abs hue diff exceeds 180 degrees
-    if (fabs(hpstd - hpsample) > pi)
-      hp -= pi;
+    if (fabs(hpstd - hpsample) > Pi)
+      hp -= Pi;
     // rollover ones that come -ve
     if (hp < 0)
-      hp += 2. * pi;
+      hp += 2. * Pi;
 
     // Check if one of the chroma values is zero, in which case set
     // mean hue to the sum which is equivalent to other value
@@ -654,14 +619,14 @@ private:
     Scalar Lpm502 = (Lp - 50.) * (Lp - 50.);
     Scalar Sl     = 1. + 0.015f * Lpm502 / std::sqrt(20.0f + Lpm502);
     Scalar Sc     = 1. + 0.045f * Cp;
-    Scalar Ta     = 1. - 0.17f * std::cos(hp - pi / 6.) +
+    Scalar Ta     = 1. - 0.17f * std::cos(hp - Pi / 6.) +
                 0.24f * std::cos(2. * hp) +
-                0.32f * std::cos(3. * hp + pi / 30.) -
-                0.20f * std::cos(4. * hp - 63. * pi / 180.);
+                0.32f * std::cos(3. * hp + Pi / 30.) -
+                0.20f * std::cos(4. * hp - 63. * Pi / 180.);
     Scalar Sh = 1. + 0.015f * Cp * Ta;
     Scalar delthetarad =
-      (30. * pi / 180.) *
-      std::exp(-std::pow(((180. / pi * hp - 275.) / 25.), 2.));
+      (30. * Pi / 180.) *
+      std::exp(-std::pow(((180. / Pi * hp - 275.) / 25.), 2.));
     Scalar Rc =
       2. * std::sqrt(std::pow(Cp, 7.) / (std::pow(Cp, 7.) + std::pow(25., 7.)));
     Scalar RT = -std::sin(2.0f * delthetarad) * Rc;

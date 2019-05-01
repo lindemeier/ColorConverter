@@ -9,7 +9,7 @@ int main()
   // define custom vec type that is defined by our type trait above
   using vec = std::array<double, 3U>;
   // Save some typing
-  using Converter = color::ColorConverter<double, std::array>;
+  using Converter = color::ColorConverter<double, 3UL, std::array>;
 
   // initialize the converter to standard sRGB illuminant (which is also the
   // default argument).
@@ -29,7 +29,8 @@ int main()
   // convert back to linear RGB from CIELab
   vec convertedLinearRgb;
   converter.lab2rgb(cieLab, convertedLinearRgb);
-  // cpmpute the difference of input and converted linear RGB
+
+  // compute the difference of input and converted linear RGB
   const auto differenceEuclid =
     std::sqrt(std::pow(convertedLinearRgb[0U] - linearRgb[0U], 2.0) +
               std::pow(convertedLinearRgb[1U] - linearRgb[1U], 2.0) +
