@@ -44,16 +44,15 @@ int main()
   vec sRgb;
 
   // convert linear to sRGB
-  converter.convert(linearRgb, sRgb, Converter::Conversion::rgb_2_srgb);
+  converter.rgb2srgb(linearRgb, sRgb);
 
   // convert the sRGB value to CIELab
   vec cieLab;
-  converter.convert(sRgb, cieLab, Converter::Conversion::srgb_2_CIELab);
+  converter.srgb2lab(sRgb, cieLab);
 
   // convert back to linear RGB from CIELab
   vec convertedLinearRgb;
-  converter.convert(cieLab, convertedLinearRgb,
-                    Converter::Conversion::CIELab_2_rgb);
+  converter.lab2rgb(cieLab, convertedLinearRgb);
   // cpmpute the difference of input and converted linear RGB
   const auto differenceEuclid =
     std::sqrt(std::pow(convertedLinearRgb[0U] - linearRgb[0U], 2.0) +
@@ -68,6 +67,7 @@ int main()
     {
       std::cout << "it didn't work!";
     }
+  std::cout << std::endl;
 
   return 0;
 }

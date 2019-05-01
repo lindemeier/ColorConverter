@@ -15,6 +15,25 @@
 namespace color
 {
 
+namespace detail
+{
+
+template <class T>
+static T f(T t)
+{
+  return (t > std::pow<T>(6. / 29., 3.))
+           ? std::pow<T>(t, 1. / 3.)
+           : (1. / 3.) * std::pow<T>(29. / 6., 2.) * t + (4. / 29.);
+}
+
+template <class T>
+static T fi(T t)
+{
+  return (t > 6. / 29.) ? std::pow<T>(t, 3.)
+                        : 3. * std::pow<T>(6. / 29., 2.) * (t - (4. / 29.));
+}
+} // namespace detail
+
 /**
  * @brief Type trait that can be used for defining new types that should be
  * supported by the ColorConverter.
@@ -124,667 +143,437 @@ private: // private constants
     {0.0193339, 0.1191920, 0.9503041}};
 
 public:
-  ColorConverter(const std::array<Scalar, 3U>& whitepoint = IM_ILLUMINANT_D65);
+  ColorConverter(const std::array<Scalar, 3U>& whitepoint = IM_ILLUMINANT_D65)
+    : illuminant(whitepoint)
+  {
+  }
 
-  inline void convert(const Vec3& input, Vec3& output,
-                      Conversion conversion) const;
+  void lab2xyz(const Vec3& Lab, Vec3& XYZ) const
+  {
+    // chromatic adaption, reference white
+    XYZ[1] = illuminant[1] * detail::fi((1. / 116.) * (Lab[0] + 16.)); // Y
+    XYZ[0] = illuminant[0] * detail::fi((1. / 116.) * (Lab[0] + 16.) +
+                                        (1. / 500.) * Lab[1]); // X
+    XYZ[2] = illuminant[2] * detail::fi((1. / 116.) * (Lab[0] + 16.) -
+                                        (1. / 200.) * Lab[2]); // Z
+  }
+
+  void xyz2lab(const Vec3& XYZ, Vec3& Lab) const
+  {
+    Lab[0] = 116. * detail::f(XYZ[1] / illuminant[1]) - 16.;
+    Lab[1] = 500. * (detail::f(XYZ[0] / illuminant[0]) -
+                     detail::f(XYZ[1] / illuminant[1]));
+    Lab[2] = 200. * (detail::f(XYZ[1] / illuminant[1]) -
+                     detail::f(XYZ[2] / illuminant[2]));
+  }
+
+  void lab2LCHab(const Vec3& Lab, Vec3& LCHab) const
+  {
+    LCHab[0] = Lab[0];                                       // [0,100]
+    LCHab[1] = std::sqrt(Lab[1] * Lab[1] + Lab[2] * Lab[2]); // [0,100]
+
+    LCHab[2] = std::atan2(Lab[2], Lab[1]);
+    if (LCHab[2] < 0)
+      {
+        LCHab[2] += M_PI * 2.; // [0, 2pi]
+      }
+  }
+
+  void LCHab2lab(const Vec3& LCHab, Vec3& Lab) const
+  {
+    Lab[0]   = LCHab[0];
+    Scalar h = LCHab[2];
+    if (h > M_PI)
+      {
+        h -= M_PI * 2.; // [0, 2pi]
+      }
+    Lab[1] = LCHab[1] * std::cos(h);
+    Lab[2] = LCHab[1] * std::sin(h);
+  }
+
+  // http://en.wikipedia.org/wiki/RYB_color_model
+  // http://threekings.tk/mirror/ryb_TR.pdf
+  void ryb2rgb(const Vec3& ryb, Vec3& rgb) const
+  {
+    auto cubicInt = [](Scalar t, Scalar A, Scalar B) {
+      Scalar weight = t * t * (3 - 2 * t);
+      return A + weight * (B - A);
+    };
+    Scalar x0, x1, x2, x3, y0, y1;
+    // red
+    x0     = cubicInt(ryb[2], 1., 0.163);
+    x1     = cubicInt(ryb[2], 1., 0.);
+    x2     = cubicInt(ryb[2], 1., 0.5);
+    x3     = cubicInt(ryb[2], 1., 0.2);
+    y0     = cubicInt(ryb[1], x0, x1);
+    y1     = cubicInt(ryb[1], x2, x3);
+    rgb[0] = cubicInt(ryb[0], y0, y1);
+    // green
+    x0     = cubicInt(ryb[2], 1., 0.373);
+    x1     = cubicInt(ryb[2], 1., 0.66);
+    x2     = cubicInt(ryb[2], 0., 0.);
+    x3     = cubicInt(ryb[2], 0.5, 0.094);
+    y0     = cubicInt(ryb[1], x0, x1);
+    y1     = cubicInt(ryb[1], x2, x3);
+    rgb[1] = cubicInt(ryb[0], y0, y1);
+    // blue
+    x0     = cubicInt(ryb[2], 1., 0.6);
+    x1     = cubicInt(ryb[2], 0., 0.2);
+    x2     = cubicInt(ryb[2], 0., 0.5);
+    x3     = cubicInt(ryb[2], 0., 0.);
+    y0     = cubicInt(ryb[1], x0, x1);
+    y1     = cubicInt(ryb[1], x2, x3);
+    rgb[2] = cubicInt(ryb[0], y0, y1);
+  }
+
+  // rgb to cmy
+  void rgb2cmy(const Vec3& rgb, Vec3& cmy) const
+  {
+    cmy[0] = 1. - rgb[0];
+    cmy[1] = 1. - rgb[1];
+    cmy[2] = 1. - rgb[2];
+  }
+
+  // cmy to rgb
+  void cmy2rgb(const Vec3& cmy, Vec3& rgb) const
+  {
+    rgb[0] = 1. - cmy[0];
+    rgb[1] = 1. - cmy[1];
+    rgb[2] = 1. - cmy[2];
+  }
+
+  // uses sRGB chromatic adapted matrix
+  void rgb2xyz(const Vec3& rgb, Vec3& XYZ) const
+  {
+    XYZ[0] = RGB2XYZ_MATRIX[0][0] * rgb[0] + RGB2XYZ_MATRIX[0][1] * rgb[1] +
+             RGB2XYZ_MATRIX[0][2] * rgb[2];
+    XYZ[1] = RGB2XYZ_MATRIX[1][0] * rgb[0] + RGB2XYZ_MATRIX[1][1] * rgb[1] +
+             RGB2XYZ_MATRIX[1][2] * rgb[2];
+    XYZ[2] = RGB2XYZ_MATRIX[2][0] * rgb[0] + RGB2XYZ_MATRIX[2][1] * rgb[1] +
+             RGB2XYZ_MATRIX[2][2] * rgb[2];
+  }
+
+  // uses sRGB chromatic adapted matrix
+  void xyz2rgb(const Vec3& XYZ, Vec3& rgb) const
+  {
+    rgb[0] = XYZ2RGB_MATRIX[0][0] * XYZ[0] + XYZ2RGB_MATRIX[0][1] * XYZ[1] +
+             XYZ2RGB_MATRIX[0][2] * XYZ[2];
+    rgb[1] = XYZ2RGB_MATRIX[1][0] * XYZ[0] + XYZ2RGB_MATRIX[1][1] * XYZ[1] +
+             XYZ2RGB_MATRIX[1][2] * XYZ[2];
+    rgb[2] = XYZ2RGB_MATRIX[2][0] * XYZ[0] + XYZ2RGB_MATRIX[2][1] * XYZ[1] +
+             XYZ2RGB_MATRIX[2][2] * XYZ[2];
+  }
+
+  // make linear rgb, no chromatic adaption
+  void srgb2rgb(const Vec3& srgb, Vec3& rgb) const
+  {
+    for (auto i = 0U; i < 3U; i++)
+      {
+        if (srgb[i] <= 0.04045)
+          rgb[i] = srgb[i] / 12.92;
+        else
+          rgb[i] = std::pow(((srgb[i] + 0.055) / 1.055), 2.4);
+      }
+  }
+
+  // make sRGB, with gamma
+  void rgb2srgb(const Vec3& rgb, Vec3& srgb) const
+  {
+    for (auto i = 0U; i < 3U; ++i)
+      {
+        if (rgb[i] <= 0.0031308)
+          srgb[i] = rgb[i] * 12.92;
+        else
+          srgb[i] = 1.055 * std::pow(rgb[i], 1. / 2.4) - 0.055;
+      }
+  }
+
+  // Lab (D50) -> XYZ -> rgb (D65) -> sRGB (D65)
+  void lab2srgb(const Vec3& Lab, Vec3& srgb) const
+  {
+    Vec3 XYZ;
+    lab2xyz(Lab, XYZ);
+    Vec3 rgb;
+    xyz2rgb(XYZ, rgb);
+    rgb2srgb(rgb, srgb);
+  }
+
+  // sRGB (D65) -> rgb (D65) -> XYZ -> Lab
+  void srgb2lab(const Vec3& srgb, Vec3& Lab) const
+  {
+    Vec3 rgb;
+    srgb2rgb(srgb, rgb);
+    Vec3 XYZ;
+    rgb2xyz(rgb, XYZ);
+    xyz2lab(XYZ, Lab);
+  }
+
+  // Lab  -> XYZ -> rgb (D65)
+  void lab2rgb(const Vec3& Lab, Vec3& rgb) const
+  {
+    Vec3 XYZ;
+    lab2xyz(Lab, XYZ);
+    xyz2rgb(XYZ, rgb);
+  }
+
+  // rgb (D65) -> XYZ -> Lab
+  void rgb2lab(const Vec3& rgb, Vec3& Lab) const
+  {
+    Vec3 XYZ;
+    rgb2xyz(rgb, XYZ);
+    xyz2lab(XYZ, Lab);
+  }
+
+  // XYZ -> rgb (D65) -> sRGB (D65)
+  void xyz2srgb(const Vec3& XYZ, Vec3& srgb) const
+  {
+    Vec3 rgb;
+    xyz2rgb(XYZ, rgb);
+    rgb2srgb(rgb, srgb);
+  }
+
+  // [0..1] -> [0..1]
+  void hsv2srgb(const Vec3& hsv, Vec3& srgb) const
+  {
+    const Scalar  h  = (360. * hsv[0]) / 60.;
+    const int32_t hi = static_cast<int32_t>(std::floor(h));
+    Scalar        f  = (h - hi);
+
+    Scalar p = hsv[2] * (1 - hsv[1]);
+    Scalar q = hsv[2] * (1 - hsv[1] * f);
+    Scalar t = hsv[2] * (1 - hsv[1] * (1 - f));
+
+    if (hi == 1)
+      {
+        srgb[0] = q;
+        srgb[1] = hsv[2];
+        srgb[2] = p;
+      }
+    else if (hi == 2)
+      {
+        srgb[0] = p;
+        srgb[1] = hsv[2];
+        srgb[2] = t;
+      }
+    else if (hi == 3)
+      {
+        srgb[0] = p;
+        srgb[1] = q;
+        srgb[2] = hsv[2];
+      }
+    else if (hi == 4)
+      {
+        srgb[0] = t;
+        srgb[1] = p;
+        srgb[2] = hsv[2];
+      }
+    else if (hi == 5)
+      {
+        srgb[0] = hsv[2];
+        srgb[1] = p;
+        srgb[2] = q;
+      }
+    else
+      {
+        srgb[0] = hsv[2];
+        srgb[1] = t;
+        srgb[2] = p;
+      }
+  }
+
+  // [0..1] -> [0..1]
+  void srgb2hsv(const Vec3& srgb, Vec3& hsv) const
+  {
+    Scalar min;
+    Scalar max;
+    Scalar delMax;
+
+    min    = std::min<Scalar>(std::min<Scalar>(srgb[0], srgb[1]), srgb[2]);
+    max    = std::max<Scalar>(std::max<Scalar>(srgb[0], srgb[1]), srgb[2]);
+    delMax = 1. / (max - min);
+
+    const Scalar fa = 1. / 360.0;
+
+    if (fuzzy(max, min))
+      hsv[0] = 0;
+    else if (fuzzy(max, srgb[0]))
+      hsv[0] = 60.0 * (0 + (srgb[1] - srgb[2]) * delMax);
+    else if (fuzzy(max, srgb[1]))
+      hsv[0] = 60.0 * (2 + (srgb[2] - srgb[0]) * delMax);
+    else if (fuzzy(max, srgb[2]))
+      hsv[0] = 60.0 * (4 + (srgb[0] - srgb[1]) * delMax);
+
+    if (hsv[0] < 0.0)
+      hsv[0] += 360.0;
+
+    if (fuzzy(max, 0.0))
+      {
+        hsv[1] = 0.0;
+      }
+    else
+      {
+        hsv[1] = (max - min) / max;
+      }
+    hsv[2] = max;
+
+    hsv[0] *= fa;
+  }
+
+  // sRGB (D65) -> XYZ
+  void srgb2xyz(const Vec3& srgb, Vec3& XYZ) const
+  {
+    Vec3 rgb;
+    srgb2rgb(srgb, rgb);
+    rgb2xyz(rgb, XYZ);
+  }
+
+  void xyz2xyY(const Vec3& XYZ, Vec3& xyY) const
+  {
+    xyY[0] = XYZ[0] / (XYZ[0] + XYZ[1] + XYZ[2]);
+    xyY[1] = XYZ[1] / (XYZ[0] + XYZ[1] + XYZ[2]);
+    xyY[2] = XYZ[1];
+  }
+
+  void xyY2xyz(const Vec3& xyY, Vec3& XYZ) const
+  {
+    XYZ[1] = xyY[2];
+    XYZ[0] = (xyY[2] / xyY[1]) * xyY[0];
+    XYZ[2] = (xyY[2] / xyY[1]) * (1 - xyY[0] - xyY[1]);
+  }
+
+  void Luv2XYZ(const Vec3& Luv, Vec3& XYZ) const
+  {
+    const Scalar eps  = 216. / 24389.;
+    const Scalar k    = 24389. / 27.;
+    const Scalar keps = k * eps;
+
+    XYZ[1] =
+      (Luv[0] > keps) ? (std::pow((Luv[0] + 16.) / 116., 3.)) : (Luv[1] / k);
+
+    Scalar Xr, Yr, Zr;
+    Xr = illuminant[0];
+    Yr = illuminant[1];
+    Zr = illuminant[2];
+
+    Scalar u0, v0;
+    u0 = (4. * Xr) / (Xr + 15. * Yr + 3. * Zr);
+    v0 = (9. * Yr) / (Xr + 15. * Yr + 3. * Zr);
+
+    Scalar a, b, c, d;
+    a = (1. / 3.) * (((52. * Luv[0]) / (Luv[1] + 13. * Luv[0] * u0)) - 1.);
+    b = -5. * XYZ[1];
+    c = -(1. / 3.);
+    d = XYZ[1] * (((39. * Luv[0]) / (Luv[2] + 13. * Luv[0] * v0)) - 5.);
+
+    XYZ[0] = (d - b) / (a - c);
+    XYZ[2] = XYZ[0] * a + b;
+  }
+
+  void Yuv2rgb(const Vec3& Yuv, Vec3& rgb) const
+  {
+    rgb[2] = 1.164 * (Yuv[0] - 16) + 2.018 * (Yuv[1] - 128.);
+    rgb[1] =
+      1.164 * (Yuv[0] - 16) - 0.813 * (Yuv[2] - 128.) - 0.391 * (Yuv[1] - 128.);
+    rgb[0] = 1.164 * (Yuv[0] - 16) + 1.596 * (Yuv[2] - 128.);
+
+    const Scalar s = (1. / 255.);
+    rgb[0] *= s;
+    rgb[1] *= s;
+    rgb[2] *= s;
+  }
+
+  void rgb2Yuv(const Vec3& rgb, Vec3& Yuv) const
+  {
+    Vec3 rgb_scaled;
+    rgb_scaled[0] = rgb[0] * 255.;
+    rgb_scaled[1] = rgb[1] * 255.;
+    rgb_scaled[2] = rgb[2] * 255.;
+    Yuv[0]        = (0.257 * rgb_scaled[0]) + (0.504 * rgb_scaled[1]) +
+             (0.098 * rgb_scaled[2]) + 16;
+    Yuv[2] = (0.439 * rgb_scaled[0]) - (0.368 * rgb_scaled[1]) -
+             (0.071 * rgb_scaled[2]) + 128;
+    Yuv[1] = -(0.148 * rgb_scaled[0]) - (0.291 * rgb_scaled[1]) +
+             (0.439 * rgb_scaled[2]) + 128;
+  }
+
+  void XYZ2Luv(const Vec3& XYZ, Vec3& Luv) const
+  {
+    const Scalar eps = 216. / 24389.;
+    const Scalar k   = 24389. / 27.;
+
+    // chromatic adaption, reference white
+    Scalar Xr = illuminant[0];
+    Scalar Yr = illuminant[1];
+    Scalar Zr = illuminant[2];
+
+    Scalar yr = XYZ[1] / Yr;
+
+    Luv[0] = (yr > eps) ? (116. * std::pow(yr, 1. / 3.) - 16.) : k * yr;
+
+    Scalar nen = XYZ[0] + 15. * XYZ[1] + 3 * XYZ[2];
+    Scalar u_  = (4 * XYZ[0]) / (nen);
+    Scalar v_  = (9 * XYZ[1]) / (nen);
+    nen        = Xr + 15. * Yr + 3 * Zr;
+    Scalar ur_ = (4 * Xr) / (nen);
+    Scalar vr_ = (9 * Yr) / (nen);
+
+    Luv[1] = 13. * Luv[0] * (u_ - ur_);
+    Luv[2] = 13. * Luv[0] * (v_ - vr_);
+  }
+
+  void Luv2LCHuv(const Vec3& Luv, Vec3& LCHuv) const
+  {
+    LCHuv[0] = Luv[0];
+    LCHuv[1] = std::sqrt((Luv[1] * Luv[1]) + (Luv[2] * Luv[2]));
+    LCHuv[2] = atan2(Luv[2], Luv[1]);
+  }
+
+  void LCHuv2Luv(const Vec3& LCHuv, Vec3& Luv) const
+  {
+    Luv[0] = LCHuv[0];
+    Luv[1] = LCHuv[1] * cos(LCHuv[2]);
+    Luv[2] = LCHuv[1] * sin(LCHuv[2]);
+  }
+
+  void srgb2CIELCHab(const Vec3& srgb, Vec3& CIELCHab) const
+  {
+    Vec3 v;
+    srgb2lab(srgb, v);
+    lab2LCHab(v, CIELCHab);
+  }
+  void rgb2CIELCHab(const Vec3& rgb, Vec3& CIELCHab) const
+  {
+    Vec3 v;
+    rgb2lab(rgb, v);
+    lab2LCHab(v, CIELCHab);
+  }
+  void CIELCHab2srgb(const Vec3& LCHab, Vec3& srgb) const
+  {
+    Vec3 v;
+    LCHab2lab(LCHab, v);
+    lab2srgb(v, srgb);
+  }
+  void CIELCHab2rgb(const Vec3& CIELCHab, Vec3& rgb) const
+  {
+    Vec3 v;
+    LCHab2lab(CIELCHab, v);
+    lab2rgb(v, rgb);
+  }
 
 private:
   const std::array<Scalar, 3U> illuminant;
 
-  inline void lab2xyz(const Vec3& Lab, Vec3& XYZ) const;
-  inline void xyz2lab(const Vec3& XYZ, Vec3& Lab) const;
-  inline void lab2LCHab(const Vec3& Lab, Vec3& LCHab) const;
-  inline void LCHab2lab(const Vec3& LCHab, Vec3& Lab) const;
-  inline void ryb2rgb(const Vec3& ryb, Vec3& rgb) const;
-  inline void rgb2cmy(const Vec3& rgb, Vec3& cmy) const;
-  inline void cmy2rgb(const Vec3& cmy, Vec3& rgb) const;
-  inline void rgb2xyz(const Vec3& rgb, Vec3& XYZ) const;
-  inline void xyz2rgb(const Vec3& XYZ, Vec3& rgb) const;
-  inline void srgb2rgb(const Vec3& srgb, Vec3& rgb) const;
-  inline void rgb2srgb(const Vec3& rgb, Vec3& srgb) const;
-  inline void lab2srgb(const Vec3& Lab, Vec3& srgb) const;
-  inline void srgb2lab(const Vec3& srgb, Vec3& Lab) const;
-  inline void lab2rgb(const Vec3& Lab, Vec3& rgb) const;
-  inline void rgb2lab(const Vec3& rgb, Vec3& Lab) const;
-  inline void xyz2srgb(const Vec3& XYZ, Vec3& srgb) const;
-  inline void hsv2srgb(const Vec3& hsv, Vec3& srgb) const;
-  inline void srgb2hsv(const Vec3& srgb, Vec3& hsv) const;
-  inline void srgb2xyz(const Vec3& srgb, Vec3& XYZ) const;
-  inline void xyz2xyY(const Vec3& XYZ, Vec3& xyY) const;
-  inline void xyY2xyz(const Vec3& xyY, Vec3& XYZ) const;
-  inline void Luv2XYZ(const Vec3& Luv, Vec3& XYZ) const;
-  inline void XYZ2Luv(const Vec3& XYZ, Vec3& Luv) const;
-  inline void Luv2LCHuv(const Vec3& Luv, Vec3& LCHuv) const;
-  inline void LCHuv2Luv(const Vec3& LCHuv, Vec3& Luv) const;
-  inline void Yuv2rgb(const Vec3& Yuv, Vec3& rgb) const;
-  inline void rgb2Yuv(const Vec3& rgb, Vec3& Yuv) const;
-
-  static bool inline fuzzy(const Scalar a, const Scalar b);
+  /**
+   * @brief Simple fuzzy comparison of floating point values.
+   *
+   * @return true
+   * @return false
+   */
+  static bool fuzzy(const Scalar a, const Scalar b)
+  {
+    return std::fabs(a - b) < std::numeric_limits<Scalar>::epsilon();
+  }
 };
-
-template <class Vec3>
-ColorConverter<Vec3>::ColorConverter(const std::array<Scalar, 3U>& whitepoint)
-  : illuminant(whitepoint)
-{
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::convert(const Vec3& input, Vec3& output,
-                                   Conversion conversion) const
-{
-  switch (conversion)
-    {
-    case Conversion::CIELab_2_XYZ:
-      {
-        lab2xyz(input, output);
-        break;
-      }
-    case Conversion::XYZ_2_CIELab:
-      {
-        xyz2lab(input, output);
-        break;
-      }
-    case Conversion::CIELab_2_LCHab:
-      {
-        lab2LCHab(input, output);
-        break;
-      }
-    case Conversion::LCH_ab_2_CIELab:
-      {
-        LCHab2lab(input, output);
-        break;
-      }
-    case Conversion::ryb_2_rgb:
-      {
-        ryb2rgb(input, output);
-        break;
-      }
-    case Conversion::rgb_2_cmy:
-      {
-        rgb2cmy(input, output);
-        break;
-      }
-    case Conversion::cmy_2_rgb:
-      {
-        cmy2rgb(input, output);
-        break;
-      }
-    case Conversion::rgb_2_XYZ:
-      {
-        rgb2xyz(input, output);
-        break;
-      }
-    case Conversion::XYZ_2_rgb:
-      {
-        xyz2rgb(input, output);
-        break;
-      }
-    case Conversion::srgb_2_rgb:
-      {
-        srgb2rgb(input, output);
-        break;
-      }
-    case Conversion::rgb_2_srgb:
-      {
-        rgb2srgb(input, output);
-        break;
-      }
-    case Conversion::CIELab_2_srgb:
-      {
-        lab2srgb(input, output);
-        break;
-      }
-    case Conversion::srgb_2_CIELab:
-      {
-        srgb2lab(input, output);
-        break;
-      }
-    case Conversion::CIELab_2_rgb:
-      {
-        lab2rgb(input, output);
-        break;
-      }
-    case Conversion::rgb_2_CIELab:
-      {
-        rgb2lab(input, output);
-        break;
-      }
-    case Conversion::XYZ_2_srgb:
-      {
-        xyz2srgb(input, output);
-        break;
-      }
-    case Conversion::hsv_2_srgb:
-      {
-        hsv2srgb(input, output);
-        break;
-      }
-    case Conversion::srgb_2_hsv:
-      {
-        srgb2hsv(input, output);
-        break;
-      }
-    case Conversion::srgb_2_XYZ:
-      {
-        srgb2xyz(input, output);
-        break;
-      }
-    case Conversion::XYZ_2_xyY:
-      {
-        xyz2xyY(input, output);
-        break;
-      }
-    case Conversion::xyY_2_XYZ:
-      {
-        xyY2xyz(input, output);
-        break;
-      }
-    case Conversion::Luv_2_XYZ:
-      {
-        Luv2XYZ(input, output);
-        break;
-      }
-    case Conversion::XYZ_2_Luv:
-      {
-        XYZ2Luv(input, output);
-        break;
-      }
-    case Conversion::Luv_2_LCH_uv:
-      {
-        Luv2LCHuv(input, output);
-        break;
-      }
-    case Conversion::LCH_uv_2_Luv:
-      {
-        LCHuv2Luv(input, output);
-        break;
-      }
-    case Conversion::Yuv_2_rgb:
-      {
-        Yuv2rgb(input, output);
-        break;
-      }
-    case Conversion::rgb_2_Yuv:
-      {
-        rgb2Yuv(input, output);
-        break;
-      }
-    case Conversion::srgb_2_CIELCHab:
-      {
-        Vec3 v;
-        srgb2lab(input, v);
-        lab2LCHab(v, output);
-        break;
-      }
-    case Conversion::rgb_2_CIELCHab:
-      {
-        Vec3 v;
-        rgb2lab(input, v);
-        lab2LCHab(v, output);
-        break;
-      }
-    case Conversion::CIELCHab_2_srgb:
-      {
-        Vec3 v;
-        LCHab2lab(input, v);
-        lab2srgb(v, output);
-        break;
-      }
-    case Conversion::CIELCHab_2_rgb:
-      {
-        Vec3 v;
-        LCHab2lab(input, v);
-        lab2rgb(v, output);
-        break;
-      }
-    default: break;
-    }
-}
-
-// rgb to cmy
-template <class Vec3>
-void ColorConverter<Vec3>::rgb2cmy(const Vec3& rgb, Vec3& cmy) const
-{
-  cmy[0] = 1. - rgb[0];
-  cmy[1] = 1. - rgb[1];
-  cmy[2] = 1. - rgb[2];
-}
-
-// cmy to rgb
-template <class Vec3>
-void ColorConverter<Vec3>::cmy2rgb(const Vec3& cmy, Vec3& rgb) const
-{
-  rgb[0] = 1. - cmy[0];
-  rgb[1] = 1. - cmy[1];
-  rgb[2] = 1. - cmy[2];
-}
-
-// http://en.wikipedia.org/wiki/RYB_color_model
-// http://threekings.tk/mirror/ryb_TR.pdf
-template <class Vec3>
-void ColorConverter<Vec3>::ryb2rgb(const Vec3& ryb, Vec3& rgb) const
-{
-  auto cubicInt = [](Scalar t, Scalar A, Scalar B) {
-    Scalar weight = t * t * (3 - 2 * t);
-    return A + weight * (B - A);
-  };
-  Scalar x0, x1, x2, x3, y0, y1;
-  // red
-  x0     = cubicInt(ryb[2], 1., 0.163);
-  x1     = cubicInt(ryb[2], 1., 0.);
-  x2     = cubicInt(ryb[2], 1., 0.5);
-  x3     = cubicInt(ryb[2], 1., 0.2);
-  y0     = cubicInt(ryb[1], x0, x1);
-  y1     = cubicInt(ryb[1], x2, x3);
-  rgb[0] = cubicInt(ryb[0], y0, y1);
-  // green
-  x0     = cubicInt(ryb[2], 1., 0.373);
-  x1     = cubicInt(ryb[2], 1., 0.66);
-  x2     = cubicInt(ryb[2], 0., 0.);
-  x3     = cubicInt(ryb[2], 0.5, 0.094);
-  y0     = cubicInt(ryb[1], x0, x1);
-  y1     = cubicInt(ryb[1], x2, x3);
-  rgb[1] = cubicInt(ryb[0], y0, y1);
-  // blue
-  x0     = cubicInt(ryb[2], 1., 0.6);
-  x1     = cubicInt(ryb[2], 0., 0.2);
-  x2     = cubicInt(ryb[2], 0., 0.5);
-  x3     = cubicInt(ryb[2], 0., 0.);
-  y0     = cubicInt(ryb[1], x0, x1);
-  y1     = cubicInt(ryb[1], x2, x3);
-  rgb[2] = cubicInt(ryb[0], y0, y1);
-}
-
-template <class T>
-static inline T f(T t)
-{
-  return (t > std::pow<T>(6. / 29., 3.))
-           ? std::pow<T>(t, 1. / 3.)
-           : (1. / 3.) * std::pow<T>(29. / 6., 2.) * t + (4. / 29.);
-}
-
-template <class T>
-static inline T fi(T t)
-{
-  return (t > 6. / 29.) ? std::pow<T>(t, 3.)
-                        : 3. * std::pow<T>(6. / 29., 2.) * (t - (4. / 29.));
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::xyz2lab(const Vec3& XYZ, Vec3& Lab) const
-{
-  Lab[0] = 116. * f(XYZ[1] / illuminant[1]) - 16.;
-  Lab[1] = 500. * (f(XYZ[0] / illuminant[0]) - f(XYZ[1] / illuminant[1]));
-  Lab[2] = 200. * (f(XYZ[1] / illuminant[1]) - f(XYZ[2] / illuminant[2]));
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::lab2xyz(const Vec3& Lab, Vec3& XYZ) const
-{
-  // chromatic adaption, reference white
-  XYZ[1] = illuminant[1] * fi((1. / 116.) * (Lab[0] + 16.)); // Y
-  XYZ[0] = illuminant[0] *
-           fi((1. / 116.) * (Lab[0] + 16.) + (1. / 500.) * Lab[1]); // X
-  XYZ[2] = illuminant[2] *
-           fi((1. / 116.) * (Lab[0] + 16.) - (1. / 200.) * Lab[2]); // Z
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::lab2LCHab(const Vec3& Lab, Vec3& LCHab) const
-{
-  LCHab[0] = Lab[0];                                       // [0,100]
-  LCHab[1] = std::sqrt(Lab[1] * Lab[1] + Lab[2] * Lab[2]); // [0,100]
-
-  LCHab[2] = std::atan2(Lab[2], Lab[1]);
-  if (LCHab[2] < 0)
-    {
-      LCHab[2] += M_PI * 2.; // [0, 2pi]
-    }
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::LCHab2lab(const Vec3& LCHab, Vec3& Lab) const
-{
-  Lab[0]   = LCHab[0];
-  Scalar h = LCHab[2];
-  if (h > M_PI)
-    {
-      h -= M_PI * 2.; // [0, 2pi]
-    }
-  Lab[1] = LCHab[1] * std::cos(h);
-  Lab[2] = LCHab[1] * std::sin(h);
-}
-
-// uses sRGB chromatic adapted matrix
-template <class Vec3>
-void ColorConverter<Vec3>::rgb2xyz(const Vec3& rgb, Vec3& XYZ) const
-{
-  XYZ[0] = RGB2XYZ_MATRIX[0][0] * rgb[0] + RGB2XYZ_MATRIX[0][1] * rgb[1] +
-           RGB2XYZ_MATRIX[0][2] * rgb[2];
-  XYZ[1] = RGB2XYZ_MATRIX[1][0] * rgb[0] + RGB2XYZ_MATRIX[1][1] * rgb[1] +
-           RGB2XYZ_MATRIX[1][2] * rgb[2];
-  XYZ[2] = RGB2XYZ_MATRIX[2][0] * rgb[0] + RGB2XYZ_MATRIX[2][1] * rgb[1] +
-           RGB2XYZ_MATRIX[2][2] * rgb[2];
-}
-
-// uses sRGB chromatic adapted matrix
-template <class Vec3>
-void ColorConverter<Vec3>::xyz2rgb(const Vec3& XYZ, Vec3& rgb) const
-{
-  rgb[0] = XYZ2RGB_MATRIX[0][0] * XYZ[0] + XYZ2RGB_MATRIX[0][1] * XYZ[1] +
-           XYZ2RGB_MATRIX[0][2] * XYZ[2];
-  rgb[1] = XYZ2RGB_MATRIX[1][0] * XYZ[0] + XYZ2RGB_MATRIX[1][1] * XYZ[1] +
-           XYZ2RGB_MATRIX[1][2] * XYZ[2];
-  rgb[2] = XYZ2RGB_MATRIX[2][0] * XYZ[0] + XYZ2RGB_MATRIX[2][1] * XYZ[1] +
-           XYZ2RGB_MATRIX[2][2] * XYZ[2];
-}
-
-// make linear rgb, no chromatic adaption
-template <class Vec3>
-void ColorConverter<Vec3>::srgb2rgb(const Vec3& srgb, Vec3& rgb) const
-{
-  for (auto i = 0U; i < 3U; i++)
-    {
-      if (srgb[i] <= 0.04045)
-        rgb[i] = srgb[i] / 12.92;
-      else
-        rgb[i] = std::pow(((srgb[i] + 0.055) / 1.055), 2.4);
-    }
-}
-
-// make sRGB, with gamma
-template <class Vec3>
-void ColorConverter<Vec3>::rgb2srgb(const Vec3& rgb, Vec3& srgb) const
-{
-  for (auto i = 0U; i < 3U; ++i)
-    {
-      if (rgb[i] <= 0.0031308)
-        srgb[i] = rgb[i] * 12.92;
-      else
-        srgb[i] = 1.055f * std::pow(rgb[i], 1. / 2.4) - 0.055;
-    }
-}
-
-// Lab (D50) -> XYZ -> rgb (D65) -> sRGB (D65)
-template <class Vec3>
-void ColorConverter<Vec3>::lab2srgb(const Vec3& Lab, Vec3& srgb) const
-{
-  Vec3 XYZ;
-  lab2xyz(Lab, XYZ);
-  Vec3 rgb;
-  xyz2rgb(XYZ, rgb);
-  rgb2srgb(rgb, srgb);
-}
-
-// sRGB (D65) -> rgb (D65) -> XYZ -> Lab
-template <class Vec3>
-void ColorConverter<Vec3>::srgb2lab(const Vec3& srgb, Vec3& Lab) const
-{
-  Vec3 rgb;
-  srgb2rgb(srgb, rgb);
-  Vec3 XYZ;
-  rgb2xyz(rgb, XYZ);
-  xyz2lab(XYZ, Lab);
-}
-
-// Lab  -> XYZ -> rgb (D65)
-template <class Vec3>
-void ColorConverter<Vec3>::lab2rgb(const Vec3& Lab, Vec3& rgb) const
-{
-  Vec3 XYZ;
-  lab2xyz(Lab, XYZ);
-  xyz2rgb(XYZ, rgb);
-}
-
-// rgb (D65) -> XYZ -> Lab
-template <class Vec3>
-void ColorConverter<Vec3>::rgb2lab(const Vec3& rgb, Vec3& Lab) const
-{
-  Vec3 XYZ;
-  rgb2xyz(rgb, XYZ);
-  xyz2lab(XYZ, Lab);
-}
-
-// XYZ -> rgb (D65) -> sRGB (D65)
-template <class Vec3>
-void ColorConverter<Vec3>::xyz2srgb(const Vec3& XYZ, Vec3& srgb) const
-{
-  Vec3 rgb;
-  xyz2rgb(XYZ, rgb);
-  rgb2srgb(rgb, srgb);
-}
-
-// [0..1] -> [0..1]
-template <class Vec3>
-void ColorConverter<Vec3>::hsv2srgb(const Vec3& hsv, Vec3& srgb) const
-{
-  const Scalar  h  = (360. * hsv[0]) / 60.;
-  const int32_t hi = static_cast<int32_t>(std::floor(h));
-  Scalar        f  = (h - hi);
-
-  Scalar p = hsv[2] * (1 - hsv[1]);
-  Scalar q = hsv[2] * (1 - hsv[1] * f);
-  Scalar t = hsv[2] * (1 - hsv[1] * (1 - f));
-
-  if (hi == 1)
-    {
-      srgb[0] = q;
-      srgb[1] = hsv[2];
-      srgb[2] = p;
-    }
-  else if (hi == 2)
-    {
-      srgb[0] = p;
-      srgb[1] = hsv[2];
-      srgb[2] = t;
-    }
-  else if (hi == 3)
-    {
-      srgb[0] = p;
-      srgb[1] = q;
-      srgb[2] = hsv[2];
-    }
-  else if (hi == 4)
-    {
-      srgb[0] = t;
-      srgb[1] = p;
-      srgb[2] = hsv[2];
-    }
-  else if (hi == 5)
-    {
-      srgb[0] = hsv[2];
-      srgb[1] = p;
-      srgb[2] = q;
-    }
-  else
-    {
-      srgb[0] = hsv[2];
-      srgb[1] = t;
-      srgb[2] = p;
-    }
-}
-
-// [0..1] -> [0..1]
-template <class Vec3>
-void ColorConverter<Vec3>::srgb2hsv(const Vec3& srgb, Vec3& hsv) const
-{
-  Scalar min;
-  Scalar max;
-  Scalar delMax;
-
-  min    = std::min<Scalar>(std::min<Scalar>(srgb[0], srgb[1]), srgb[2]);
-  max    = std::max<Scalar>(std::max<Scalar>(srgb[0], srgb[1]), srgb[2]);
-  delMax = 1. / (max - min);
-
-  const Scalar fa = 1. / 360.0;
-
-  if (fuzzy(max, min))
-    hsv[0] = 0;
-  else if (fuzzy(max, srgb[0]))
-    hsv[0] = 60.0 * (0 + (srgb[1] - srgb[2]) * delMax);
-  else if (fuzzy(max, srgb[1]))
-    hsv[0] = 60.0 * (2 + (srgb[2] - srgb[0]) * delMax);
-  else if (fuzzy(max, srgb[2]))
-    hsv[0] = 60.0 * (4 + (srgb[0] - srgb[1]) * delMax);
-
-  if (hsv[0] < 0.0)
-    hsv[0] += 360.0;
-
-  if (fuzzy(max, 0.0))
-    {
-      hsv[1] = 0.0;
-    }
-  else
-    {
-      hsv[1] = (max - min) / max;
-    }
-  hsv[2] = max;
-
-  hsv[0] *= fa;
-}
-
-// sRGB (D65) -> XYZ
-template <class Vec3>
-void ColorConverter<Vec3>::srgb2xyz(const Vec3& srgb, Vec3& XYZ) const
-{
-  Vec3 rgb;
-  srgb2rgb(srgb, rgb);
-  rgb2xyz(rgb, XYZ);
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::xyz2xyY(const Vec3& XYZ, Vec3& xyY) const
-{
-  xyY[0] = XYZ[0] / (XYZ[0] + XYZ[1] + XYZ[2]);
-  xyY[1] = XYZ[1] / (XYZ[0] + XYZ[1] + XYZ[2]);
-  xyY[2] = XYZ[1];
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::xyY2xyz(const Vec3& xyY, Vec3& XYZ) const
-{
-  XYZ[1] = xyY[2];
-  XYZ[0] = (xyY[2] / xyY[1]) * xyY[0];
-  XYZ[2] = (xyY[2] / xyY[1]) * (1 - xyY[0] - xyY[1]);
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::Luv2XYZ(const Vec3& Luv, Vec3& XYZ) const
-{
-  const Scalar eps  = 216. / 24389.;
-  const Scalar k    = 24389. / 27.;
-  const Scalar keps = k * eps;
-
-  XYZ[1] =
-    (Luv[0] > keps) ? (std::pow((Luv[0] + 16.) / 116., 3.)) : (Luv[1] / k);
-
-  Scalar Xr, Yr, Zr;
-  Xr = illuminant[0];
-  Yr = illuminant[1];
-  Zr = illuminant[2];
-
-  Scalar u0, v0;
-  u0 = (4. * Xr) / (Xr + 15. * Yr + 3. * Zr);
-  v0 = (9. * Yr) / (Xr + 15. * Yr + 3. * Zr);
-
-  Scalar a, b, c, d;
-  a = (1. / 3.) * (((52. * Luv[0]) / (Luv[1] + 13. * Luv[0] * u0)) - 1.);
-  b = -5. * XYZ[1];
-  c = -(1. / 3.);
-  d = XYZ[1] * (((39. * Luv[0]) / (Luv[2] + 13. * Luv[0] * v0)) - 5.);
-
-  XYZ[0] = (d - b) / (a - c);
-  XYZ[2] = XYZ[0] * a + b;
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::Yuv2rgb(const Vec3& Yuv, Vec3& rgb) const
-{
-  rgb[2] = 1.164 * (Yuv[0] - 16) + 2.018 * (Yuv[1] - 128.);
-  rgb[1] =
-    1.164 * (Yuv[0] - 16) - 0.813 * (Yuv[2] - 128.) - 0.391 * (Yuv[1] - 128.);
-  rgb[0] = 1.164 * (Yuv[0] - 16) + 1.596 * (Yuv[2] - 128.);
-
-  const Scalar s = (1. / 255.);
-  rgb[0] *= s;
-  rgb[1] *= s;
-  rgb[2] *= s;
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::rgb2Yuv(const Vec3& rgb, Vec3& Yuv) const
-{
-  Vec3 rgb_scaled;
-  rgb_scaled[0] = rgb[0] * 255.;
-  rgb_scaled[1] = rgb[1] * 255.;
-  rgb_scaled[2] = rgb[2] * 255.;
-  Yuv[0]        = (0.257 * rgb_scaled[0]) + (0.504 * rgb_scaled[1]) +
-           (0.098 * rgb_scaled[2]) + 16;
-  Yuv[2] = (0.439 * rgb_scaled[0]) - (0.368 * rgb_scaled[1]) -
-           (0.071 * rgb_scaled[2]) + 128;
-  Yuv[1] = -(0.148 * rgb_scaled[0]) - (0.291 * rgb_scaled[1]) +
-           (0.439 * rgb_scaled[2]) + 128;
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::XYZ2Luv(const Vec3& XYZ, Vec3& Luv) const
-{
-  const Scalar eps = 216. / 24389.;
-  const Scalar k   = 24389. / 27.;
-
-  // chromatic adaption, reference white
-  Scalar Xr = illuminant[0];
-  Scalar Yr = illuminant[1];
-  Scalar Zr = illuminant[2];
-
-  Scalar yr = XYZ[1] / Yr;
-
-  Luv[0] = (yr > eps) ? (116. * std::pow(yr, 1. / 3.) - 16.) : k * yr;
-
-  Scalar nen = XYZ[0] + 15. * XYZ[1] + 3 * XYZ[2];
-  Scalar u_  = (4 * XYZ[0]) / (nen);
-  Scalar v_  = (9 * XYZ[1]) / (nen);
-  nen        = Xr + 15. * Yr + 3 * Zr;
-  Scalar ur_ = (4 * Xr) / (nen);
-  Scalar vr_ = (9 * Yr) / (nen);
-
-  Luv[1] = 13. * Luv[0] * (u_ - ur_);
-  Luv[2] = 13. * Luv[0] * (v_ - vr_);
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::Luv2LCHuv(const Vec3& Luv, Vec3& LCHuv) const
-{
-  LCHuv[0] = Luv[0];
-  LCHuv[1] = std::sqrt((Luv[1] * Luv[1]) + (Luv[2] * Luv[2]));
-  LCHuv[2] = atan2(Luv[2], Luv[1]);
-}
-
-template <class Vec3>
-void ColorConverter<Vec3>::LCHuv2Luv(const Vec3& LCHuv, Vec3& Luv) const
-{
-  Luv[0] = LCHuv[0];
-  Luv[1] = LCHuv[1] * cos(LCHuv[2]);
-  Luv[2] = LCHuv[1] * sin(LCHuv[2]);
-}
-
-/**
- * @brief Simple fuzzy comparison of floating point values.
- *
- * @tparam T
- * @param a
- * @param b
- * @return true
- * @return false
- */
-template <class Vec3>
-bool ColorConverter<Vec3>::fuzzy(const typename VecType<Vec3>::Scalar a,
-                                 const typename VecType<Vec3>::Scalar b)
-{
-  return std::fabs(a - b) <
-         std::numeric_limits<typename VecType<Vec3>::Scalar>::epsilon();
-}
 
 /**
  * @brief Compute difference of two given colors.
