@@ -330,19 +330,19 @@ public:
 
     const Scalar fa = 1. / 360.0;
 
-    if (fuzzy(max, min))
+    if (fuzzyCompare(max, min))
       hsv[0] = 0;
-    else if (fuzzy(max, srgb[0]))
+    else if (fuzzyCompare(max, srgb[0]))
       hsv[0] = 60.0 * (0 + (srgb[1] - srgb[2]) * delMax);
-    else if (fuzzy(max, srgb[1]))
+    else if (fuzzyCompare(max, srgb[1]))
       hsv[0] = 60.0 * (2 + (srgb[2] - srgb[0]) * delMax);
-    else if (fuzzy(max, srgb[2]))
+    else if (fuzzyCompare(max, srgb[2]))
       hsv[0] = 60.0 * (4 + (srgb[0] - srgb[1]) * delMax);
 
     if (hsv[0] < 0.0)
       hsv[0] += 360.0;
 
-    if (fuzzy(max, 0.0))
+    if (fuzzyCompare(max, 0.0))
       {
         hsv[1] = 0.0;
       }
@@ -496,34 +496,6 @@ public:
     lab2rgb(v, rgb);
   }
 
-private:
-  const std::array<Scalar, 3U> illuminant;
-
-  static Scalar f(Scalar t)
-  {
-    return (t > std::pow<Scalar>(6. / 29., 3.))
-             ? std::pow<Scalar>(t, 1. / 3.)
-             : (1. / 3.) * std::pow<Scalar>(29. / 6., 2.) * t + (4. / 29.);
-  }
-
-  static Scalar fi(Scalar t)
-  {
-    return (t > 6. / 29.)
-             ? std::pow<Scalar>(t, 3.)
-             : 3. * std::pow<Scalar>(6. / 29., 2.) * (t - (4. / 29.));
-  }
-
-  /**
-   * @brief Simple fuzzy comparison of floating point values.
-   *
-   * @return true
-   * @return false
-   */
-  static bool fuzzy(const Scalar a, const Scalar b)
-  {
-    return std::fabs(a - b) < std::numeric_limits<Scalar>::epsilon();
-  }
-
   /**
    * @brief Compute difference of two given colors.
    *
@@ -572,7 +544,7 @@ private:
     Scalar hpsample = std::atan2(bsample, apsample);
     if (hpsample < 0)
       hpsample += 2. * Pi;
-    if (fuzzy((fabs(apsample) + fabs(bsample)), 0.))
+    if (fuzzyCompare((fabs(apsample) + fabs(bsample)), 0.))
       hpsample = 0.;
 
     Scalar dL = (Lsample - Lstd);
@@ -585,7 +557,7 @@ private:
     if (dhp < -Pi)
       dhp += 2. * Pi;
     // set chroma difference to zero if the product of chromas is zero
-    if (fuzzy(Cpprod, 0.))
+    if (fuzzyCompare(Cpprod, 0.))
       dhp = 0.;
 
     // Note that the defining equations actually need
@@ -613,7 +585,7 @@ private:
 
     // Check if one of the chroma values is zero, in which case set
     // mean hue to the sum which is equivalent to other value
-    if (fuzzy(Cpprod, 0.))
+    if (fuzzyCompare(Cpprod, 0.))
       hp = hpsample + hpstd;
 
     Scalar Lpm502 = (Lp - 50.) * (Lp - 50.);
@@ -634,6 +606,36 @@ private:
     // The CIE 00 color difference
     return std::sqrt(std::pow((dL / Sl), 2.) + std::pow((dC / Sc), 2.) +
                      std::pow((dH / Sh), 2.) + RT * (dC / Sc) * (dH / Sh));
+  }
+
+private:
+  const std::array<Scalar, 3U> illuminant;
+
+  static Scalar f(Scalar t)
+  {
+    return (t > std::pow<Scalar>(6. / 29., 3.))
+             ? std::pow<Scalar>(t, 1. / 3.)
+             : (1. / 3.) * std::pow<Scalar>(29. / 6., 2.) * t + (4. / 29.);
+  }
+
+  static Scalar fi(Scalar t)
+  {
+    return (t > 6. / 29.)
+             ? std::pow<Scalar>(t, 3.)
+             : 3. * std::pow<Scalar>(6. / 29., 2.) * (t - (4. / 29.));
+  }
+
+  /**
+   * @brief Simple fuzzyCompare comparison of floating point values.
+   *
+   * @return true
+   * @return false
+   */
+  static bool fuzzyCompare(const Scalar a, const Scalar b)
+  {
+    constexpr auto FuzzynessFactor = 10.0;
+    return std::fabs(a - b) <
+           (FuzzynessFactor * std::numeric_limits<Scalar>::epsilon());
   }
 };
 
