@@ -9,7 +9,7 @@ int main()
   // define custom vec type that is defined by our type trait above
   using vec = std::array<double, 3U>;
   // Save some typing
-  using Converter = color::ColorConverter<double, 3UL, std::array>;
+  using Converter = color::ColorConverter<double, std::array<double, 3UL>>;
 
   // initialize the converter to standard sRGB illuminant (which is also the
   // default argument).

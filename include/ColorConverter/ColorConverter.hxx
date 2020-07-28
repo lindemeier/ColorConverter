@@ -34,13 +34,11 @@ namespace color
  *
  * @tparam Vec The data structure template class of the form Vec<Scalar, 3UL>
  */
-template <class Scalar, size_t N, template <class, size_t> class Vec,
-          typename std::enable_if_t<
-            std::is_floating_point<Scalar>::value && (N == 3UL), int> = 0>
+template <
+  class Scalar, class Vec3,
+  typename std::enable_if_t<std::is_floating_point<Scalar>::value, int> = 0>
 class ColorConverter
 {
-  using Vec3 = Vec<Scalar, N>;
-
   static constexpr Scalar Pi =
     static_cast<Scalar>(3.1415926535897932384626433832795);
 
